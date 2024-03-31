@@ -1,33 +1,76 @@
 # import the necessary modules from Flask.
-from flask import Flask, render_template, redirect, url_for
-from surveys import satisfaction_survey, personality_quiz
+from flask import Flask, request, render_template, redirect, flash, session
+from flask_debugtoolbar import DebugToolbarExtension
+from surveys import satisfaction_survey as survey
 
-#create an instance of the Flask class and initialize an empty list called responses
+RESPONSES_KEY = "responses"
+
 app = Flask(__name__)
-responses = []
 
-# define a dictionary called survey that contains the title, instructions, and questions for the survey.
-survey = {
-    "title": "Customer Satisfaction Survey",
-    "instructions": "Please fill out a survey about your experience with us.",
-    "questions": [
-        "Have you shopped here before?",
-        "Did someone else shop with you today?",
-        "On average, how much do you spend a month on frisbees?",
-        "Are you likely to shop here again?",
-    ]
-}
+app.config["SECRET_KEY"] = "chacotaco"
+# app.config["DEBUG_TB_INTERCEPT_REDIRECTS"] = False
+debug = DebugToolbarExtension(app)
 
-#The `show_survey_start` function is a route handler for the root route `/`. It renders a template called `survey_start.html` and passes the `survey` dictionary to the template. This template should display the title and instructions of the survey, and include a button that links to `/questions/0`.
-@app.route('/')
+
+@app.route("/")
 def show_survey_start():
-    return render_template('survey_start.html', survey=survey)
+    """Select a survey."""
+    return render_template("survey_start.html", survey=survey)
 
-if __name__ == "__main__":
-    app.run(debug=True)
-    
-#show_question is a route handler for the /questions/<idx> route. It takes an argument idx, which is the index of the question in the questions list. It then renders a template called question.html and passes the question at the given index to the template.
-@app.route('/questions/<int:idx>')
-def show_question(idx):
-    # Add your code here to handle the question
-    return render_template('question.html', question=survey['questions'][idx])
+
+@app.route("/begin", methods=["POST"])
+def start_survey():
+    """Clear the session of responses."""
+
+    session[RESPONSES_KEY] = []
+
+    return redirect("/questions/0")
+
+
+@app.route("/answer", methods=["POST"])
+def handle_question():
+    """Save response and redirect to next question."""
+
+    # get the response choice
+    choice = request.form["answer"]
+
+    # add this response to the session
+    responses = session[RESPONSES_KEY]
+    responses.append(choice)
+    session[RESPONSES_KEY] = responses
+
+    if len(responses) == len(survey.questions):
+        # They've answered all the questions! Thank them.
+        return redirect("/complete")
+
+    else:
+        return redirect(f"/questions/{len(responses)}")
+
+
+@app.route("/questions/<int:qid>")
+def show_question(qid):
+    """Display current question."""
+    responses = session.get(RESPONSES_KEY)
+
+    if responses is None:
+        # trying to access question page too soon
+        return redirect("/")
+
+    if len(responses) == len(survey.questions):
+        # They've answered all the questions! Thank them.
+        return redirect("/complete")
+
+    if len(responses) != qid:
+        # Trying to access questions out of order.
+        flash(f"Invalid question id: {qid}.")
+        return redirect(f"/questions/{len(responses)}")
+
+    question = survey.questions[qid]
+    return render_template("question.html", question_num=qid, question=question)
+
+
+@app.route("/complete")
+def complete():
+    """Survey complete. Show completion page."""
+
+    return render_template("completion.html")
